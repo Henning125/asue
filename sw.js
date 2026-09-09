@@ -1,13 +1,13 @@
-const CACHE = 'atemschutz-pwa-v13';
+const CACHE = 'atemschutz-pwa-v14';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png','./jsQR.js'
 ];
 const LIBS = [
-  'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js',
+  
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
 ];
 
