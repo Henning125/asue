@@ -332,7 +332,7 @@
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 12.0</span></div></div><span class="sub">Live</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 13.0</span></div></div><span class="sub">Live</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-history">Gespeicherte Einsätze</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
@@ -808,34 +808,39 @@
 
     async function detectFrame(){
       if(stopped || video.readyState < video.HAVE_ENOUGH_DATA) return null;
-      try {
-        if(detector){
-          const codes = await detector.detect(video);
-          if(codes && codes.length && codes[0].rawValue) return codes[0].rawValue;
-        }
-      } catch(e) {}
-
       if(!window.jsQR) return null;
+
       const w = video.videoWidth, h = video.videoHeight;
       if(!w || !h) return null;
-      canvas.width = w; canvas.height = h;
-      ctx.drawImage(video,0,0,w,h);
-      let img = ctx.getImageData(0,0,w,h);
+
+      // iPad/Safari: jsQR als Hauptscanner verwenden. BarcodeDetector kann
+      // auf iOS je nach Version unzuverlässig sein und wird deshalb für die
+      // Live-Kamera bewusst nicht vorgeschaltet.
+      const side = Math.min(w, h);
+      const crop = Math.min(side, 900);
+      const sx = Math.max(0, Math.round((w - crop) / 2));
+      const sy = Math.max(0, Math.round((h - crop) / 2));
+
+      canvas.width = crop;
+      canvas.height = crop;
+      ctx.drawImage(video, sx, sy, crop, crop, 0, 0, crop, crop);
+      let img = ctx.getImageData(0, 0, crop, crop);
       let code = jsQR(img.data, img.width, img.height, {inversionAttempts:'attemptBoth'});
       if(code && code.data) return code.data;
 
-      // Zweiter Versuch: nur den mittleren Bereich, damit ein kleiner QR-Code
-      // im Kamerabild mehr Pixel bekommt.
-      const cropSize = Math.min(w,h);
-      const sx = Math.max(0, Math.round((w-cropSize)/2));
-      const sy = Math.max(0, Math.round((h-cropSize)/2));
-      const cropCanvas = document.createElement('canvas');
-      cropCanvas.width = cropSize; cropCanvas.height = cropSize;
-      const cctx = cropCanvas.getContext('2d',{willReadFrequently:true});
-      cctx.drawImage(video,sx,sy,cropSize,cropSize,0,0,cropSize,cropSize);
-      img = cctx.getImageData(0,0,cropSize,cropSize);
-      code = jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'});
-      return code && code.data ? code.data : null;
+      // Zweiter Versuch mit kleinerem Bild – auf älteren iPads deutlich
+      // schneller und manchmal robuster bei ungünstiger Beleuchtung.
+      const small = 600;
+      const smallCanvas = document.createElement('canvas');
+      smallCanvas.width = small;
+      smallCanvas.height = small;
+      const sctx = smallCanvas.getContext('2d', {willReadFrequently:true});
+      sctx.drawImage(video, sx, sy, crop, crop, 0, 0, small, small);
+      img = sctx.getImageData(0, 0, small, small);
+      code = jsQR(img.data, img.width, img.height, {inversionAttempts:'attemptBoth'});
+      if(code && code.data) return code.data;
+
+      return null;
     }
 
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -864,13 +869,7 @@
         const img = new Image();
         img.onload = async ()=>{
           try {
-            // Native BarcodeDetector zuerst auch für Fotos verwenden.
-            if(detector){
-              try {
-                const codes = await detector.detect(img);
-                if(codes && codes.length && codes[0].rawValue){ finish(codes[0].rawValue); return; }
-              } catch(e) {}
-            }
+            // Auf iPad/Safari bewusst direkt jsQR verwenden.
             if(!window.jsQR){ URL.revokeObjectURL(img.src); hint.textContent='QR-Erkennung ist nicht geladen. Bitte App einmal mit Internet öffnen.'; return; }
             const max = 2200;
             const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
