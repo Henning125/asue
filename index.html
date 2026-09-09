@@ -332,7 +332,7 @@
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 15.0</span></div></div><span class="sub">Live</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 16.0</span></div></div><span class="sub">Live</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-history">Gespeicherte Einsätze</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
@@ -412,9 +412,9 @@
     let actions = '';
 
     if(t.status === 'vorbereitet'){
-      const startReady = t.mitglieder.length>0 && t.mitglieder.every(m=>m.startdruck!=null && m.startdruck!=='' && Number.isFinite(Number(m.startdruck)));
+      const startReady = t.mitglieder.length>0 && t.mitglieder.every(m=>String(m.name||'').trim()!=='');
       timerHtml = `<div class="timer" style="color:var(--text-dim); font-size:20px;">Noch nicht gestartet</div>`;
-      actions = `<button class="btn small primary act-start" ${startReady?'':'disabled'} title="${startReady?'Trupp starten':'Start erst möglich, wenn für alle Mitglieder ein Startdruck eingetragen ist.'}">Start (Luft anschließen)</button>
+      actions = `<button class="btn small primary act-start" ${startReady?'':'disabled'} title="${startReady?'Trupp starten':'Start erst möglich, wenn für alle Mitglieder ein Name eingetragen ist.'}">Start (Luft anschließen)</button>
                   <button class="btn small ghost act-edit">Bearbeiten</button>
                   <button class="btn small ghost act-del">Löschen</button>`;
     } else {
@@ -684,9 +684,14 @@
   // Start ist ausschließlich möglich, wenn für jedes Mitglied ein Startdruck vorliegt.
   function attemptStart(id){
     const t = state.trupps.find(x=>x.id===id); if(!t) return;
-    const allSet = t.mitglieder.length>0 && t.mitglieder.every(m => m.startdruck!=null && m.startdruck!=='' && Number.isFinite(Number(m.startdruck)));
+    const namesSet = t.mitglieder.length>0 && t.mitglieder.every(m => String(m.name||'').trim()!=='');
+    if(!namesSet){
+      alert('Der Trupp kann erst gestartet werden, wenn für alle Mitglieder ein Name eingetragen ist.');
+      return;
+    }
+    const allSet = t.mitglieder.every(m => m.startdruck!=null && m.startdruck!=='' && Number.isFinite(Number(m.startdruck)));
     if(!allSet){
-      alert('Der Trupp kann erst gestartet werden, wenn für alle Mitglieder ein Startdruck eingetragen ist. Bitte den Trupp über „Bearbeiten“ ergänzen.');
+      openStartModal(id);
       return;
     }
     doStart(t, t.mitglieder.map(m=>({name:m.name, druck:m.startdruck})));
