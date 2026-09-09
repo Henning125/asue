@@ -332,7 +332,7 @@
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 14.0</span></div></div><span class="sub">Live</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 15.0</span></div></div><span class="sub">Live</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-history">Gespeicherte Einsätze</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
@@ -391,6 +391,7 @@
       const r = scope.querySelector('.act-rueckzug'); if(r) r.onclick = ()=>openDruckModal(t.id, 'rueckzug');
       const e = scope.querySelector('.act-ende'); if(e) e.onclick = ()=>openDruckModal(t.id, 'ende');
       const del = scope.querySelector('.act-del'); if(del) del.onclick = ()=>deleteTrupp(t.id);
+      const edit = scope.querySelector('.act-edit'); if(edit) edit.onclick = ()=>openEditTruppModal(t.id);
       const ack = scope.querySelector('.act-sofort-ack'); if(ack) ack.onclick = ()=>ackSofort(t.id);
     });
   }
@@ -411,8 +412,10 @@
     let actions = '';
 
     if(t.status === 'vorbereitet'){
+      const startReady = t.mitglieder.length>0 && t.mitglieder.every(m=>m.startdruck!=null && m.startdruck!=='' && Number.isFinite(Number(m.startdruck)));
       timerHtml = `<div class="timer" style="color:var(--text-dim); font-size:20px;">Noch nicht gestartet</div>`;
-      actions = `<button class="btn small primary act-start">Start (Luft anschließen)</button>
+      actions = `<button class="btn small primary act-start" ${startReady?'':'disabled'} title="${startReady?'Trupp starten':'Start erst möglich, wenn für alle Mitglieder ein Startdruck eingetragen ist.'}">Start (Luft anschließen)</button>
+                  <button class="btn small ghost act-edit">Bearbeiten</button>
                   <button class="btn small ghost act-del">Löschen</button>`;
     } else {
       const elapsedSec = t.endzeit ? (t.endzeit - t.start)/1000 : (Date.now() - t.start)/1000;
@@ -438,6 +441,7 @@
 
       if(t.status === 'aktiv'){
         actions = `
+          <button class="btn small ghost act-edit">Bearbeiten</button>
           <button class="btn small violet act-druck">Druck erfassen</button>
           ${!t.zielzeit ? '<button class="btn small good act-ziel">Einsatzziel erreicht</button>':''}
           ${!t.rueckzugzeit ? '<button class="btn small warnbtn act-rueckzug">Rückzug begonnen</button>':''}
@@ -600,6 +604,74 @@
     };
   }
 
+  // ---------- Trupp bearbeiten ----------
+  function openEditTruppModal(id){
+    const t = state.trupps.find(x=>x.id===id); if(!t) return;
+    if(t.status==='beendet') return;
+    const tmp = {
+      name:t.name || '',
+      funkruf:t.funkruf || '',
+      erwarteteZeitMin:t.erwarteteZeitMin || 30,
+      mitglieder:t.mitglieder.map(m=>({name:m.name || '', startdruck:m.startdruck!=null?m.startdruck:null}))
+    };
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2>Trupp bearbeiten</h2>
+        <div class="field"><label>Truppbezeichnung</label><input id="e-name" value="${esc(tmp.name)}"></div>
+        <div class="field"><label>Funkruf des Trupps <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label><input id="e-funkruf" value="${esc(tmp.funkruf)}"></div>
+        <div class="field"><label>Voraussichtliche Einsatzzeit (Minuten)</label><input id="e-zeit" type="number" min="5" step="5" value="${tmp.erwarteteZeitMin}"></div>
+        <div id="edit-members-wrap"></div>
+        <button class="btn small ghost" id="e-add-member">+ Weiteres Mitglied</button>
+        <div class="modal-actions">
+          <button class="btn ghost" id="e-cancel">Abbrechen</button>
+          <button class="btn primary" id="e-save">Änderungen speichern</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    function renderEditMembers(){
+      const wrap=overlay.querySelector('#edit-members-wrap');
+      wrap.innerHTML=tmp.mitglieder.map((m,i)=>`
+        <div class="member-row" data-i="${i}">
+          <div class="field"><label>Name</label><input class="em-name" value="${esc(m.name)}" placeholder="Nachname, Vorname"></div>
+          <div class="field" style="max-width:110px;"><label>Startdruck</label><input class="em-druck" type="number" min="0" max="400" value="${m.startdruck!=null?m.startdruck:''}" placeholder="bar" ${t.status==='aktiv'?'disabled':''}></div>
+          <button class="btn small" style="align-self:flex-end;" data-scan="${i}">Scan</button>
+        </div>`).join('');
+      wrap.querySelectorAll('.member-row').forEach(row=>{
+        const i=+row.dataset.i;
+        row.querySelector('.em-name').oninput=e=>tmp.mitglieder[i].name=e.target.value;
+        row.querySelector('.em-druck').oninput=e=>tmp.mitglieder[i].startdruck=e.target.value?+e.target.value:null;
+        row.querySelector('[data-scan]').onclick=()=>openScanModal(data=>{ applyScanToMember(tmp,i,data); renderEditMembers(); });
+      });
+    }
+    renderEditMembers();
+    overlay.querySelector('#e-name').oninput=e=>tmp.name=e.target.value;
+    overlay.querySelector('#e-funkruf').oninput=e=>tmp.funkruf=e.target.value;
+    overlay.querySelector('#e-zeit').oninput=e=>tmp.erwarteteZeitMin=+e.target.value||30;
+    overlay.querySelector('#e-add-member').onclick=()=>{tmp.mitglieder.push({name:'',startdruck:null});renderEditMembers();};
+    overlay.querySelector('#e-cancel').onclick=()=>overlay.remove();
+    overlay.querySelector('#e-save').onclick=async()=>{
+      if(!tmp.name.trim()){alert('Bitte Truppbezeichnung eingeben.');return;}
+      const members=tmp.mitglieder.filter(m=>m.name.trim());
+      if(!members.length){alert('Bitte mindestens ein Mitglied eintragen.');return;}
+      const oldNames=t.mitglieder.map(m=>m.name);
+      t.name=tmp.name.trim();
+      t.funkruf=tmp.funkruf.trim();
+      t.erwarteteZeitMin=tmp.erwarteteZeitMin;
+      // Keep pressure history and calculated thresholds consistent when member names change.
+      const renameMap={};
+      oldNames.forEach((oldName,i)=>{ const newName=members[i]?.name?.trim(); if(newName && newName!==oldName) renameMap[oldName]=newName; });
+      t.mitglieder=members.map(m=>({name:m.name.trim(),startdruck:m.startdruck}));
+      if(t.druckwerte) t.druckwerte.forEach(line=>line.werte?.forEach(w=>{if(renameMap[w.name])w.name=renameMap[w.name];}));
+      if(t.rueckzugSchwellen){
+        const neu={}; Object.entries(t.rueckzugSchwellen).forEach(([name,val])=>{neu[renameMap[name]||name]=val;}); t.rueckzugSchwellen=neu;
+      }
+      await saveState(state); overlay.remove(); render();
+    };
+  }
+
   function applyScanToMember(tmp, i, raw){
     const parts = raw.split(/[;|]/).map(s=>s.trim());
     tmp.mitglieder[i].name = parts[0] || tmp.mitglieder[i].name;
@@ -609,18 +681,15 @@
   }
 
   // ---------- Start-Logik ----------
-  // Wenn beim Anlegen bereits für alle Mitglieder ein Startdruck eingetragen wurde,
-  // startet der Trupp sofort ohne erneute Abfrage. Fehlt bei mindestens einem
-  // Mitglied der Wert, öffnet sich das Startdruck-Modal (bereits bekannte Werte
-  // werden dort vorausgefüllt).
+  // Start ist ausschließlich möglich, wenn für jedes Mitglied ein Startdruck vorliegt.
   function attemptStart(id){
     const t = state.trupps.find(x=>x.id===id); if(!t) return;
-    const allSet = t.mitglieder.length>0 && t.mitglieder.every(m => m.startdruck!=null && m.startdruck!=='' );
-    if(allSet){
-      doStart(t, t.mitglieder.map(m=>({name:m.name, druck:m.startdruck})));
-    } else {
-      openStartModal(id);
+    const allSet = t.mitglieder.length>0 && t.mitglieder.every(m => m.startdruck!=null && m.startdruck!=='' && Number.isFinite(Number(m.startdruck)));
+    if(!allSet){
+      alert('Der Trupp kann erst gestartet werden, wenn für alle Mitglieder ein Startdruck eingetragen ist. Bitte den Trupp über „Bearbeiten“ ergänzen.');
+      return;
     }
+    doStart(t, t.mitglieder.map(m=>({name:m.name, druck:m.startdruck})));
   }
 
   async function doStart(t, werte){
