@@ -9,7 +9,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Atemschutzüberwachung – v23</title>
+<title>Atemschutzüberwachung – v35</title>
 <script src="./jsQR.js"></script>
 <script src="./qrcode-generator.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -173,6 +173,7 @@
 
   const STORE_KEY = 'atemschutz:einsatz';
   const HISTORY_KEY = 'atemschutz:einsaetze';
+  const PDF_HISTORY_KEY = 'atemschutz:pdf:';
   const ROLE_KEY = 'atemschutz:rolle';
   const DRUCK_INTERVAL_MIN = 10; // Erinnerung alle 10 Minuten
   const EDIT_ROLE_PIN = '0000'; // Schutz beim Wechsel aus reinen Lesemodus-Rollen
@@ -1039,6 +1040,9 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     }
     if(!confirm('Aktuellen Einsatz beenden?')) return;
     saveHistory(state);
+    // Detailbericht automatisch erzeugen und lokal speichern, bevor der aktuelle
+    // Einsatz aus dem aktiven Zustand entfernt wird.
+    await exportPDF(state, {silent:true});
     await cloudEndEinsatz(state);
     state = null;
     await saveState(null);
@@ -1717,12 +1721,17 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
   }
 
   // ---------- Detaillierter PDF-Bericht, sortiert nach Trupps ----------
-  function exportPDF(einsatzState){
+  async function exportPDF(einsatzState, options){
     einsatzState = einsatzState || state;
+    options = options || {};
     if(!window.jspdf || !window.jspdf.jsPDF){
-      alert('PDF-Bibliothek konnte nicht geladen werden. Bitte Internetverbindung prüfen und erneut versuchen.');
-      return;
+      if(!options.silent){
+        alert('PDF-Bibliothek konnte nicht geladen werden. Bitte die App einmal mit Internet öffnen und erneut versuchen.');
+      }
+      console.warn('PDF-Bibliothek nicht verfügbar.');
+      return false;
     }
+
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({unit:'mm', format:'a4'});
     const pageBottom = 285;
@@ -1750,7 +1759,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
       line('Noch keine Trupps mit Einsatzdaten vorhanden.', 14, 11, false);
     }
 
-    sortedTrupps.forEach((t, idx)=>{
+    sortedTrupps.forEach((t)=>{
       ensureSpace(14);
       doc.setDrawColor(180); doc.setLineWidth(0.3);
       doc.line(14, y-3, 196, y-3);
@@ -1809,7 +1818,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
       ensureSpace(8);
       line('Ereignisprotokoll', 16, 10, true); y+=5;
       doc.setFontSize(8.5); doc.setFont(undefined,'normal');
-      t.log.forEach(l=>{
+      (t.log || []).forEach(l=>{
         ensureSpace(4.2);
         const lines = doc.splitTextToSize(`${new Date(l.zeit).toLocaleTimeString('de-DE')} — ${l.text}`, 178);
         lines.forEach(ln=>{ ensureSpace(4.2); doc.text(ln, 18, y); y+=4.2; });
@@ -1817,10 +1826,43 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
       y+=6;
     });
 
-    doc.save('atemschutznachweis_'+einsatzState.einsatz.datum+'.pdf');
-  }
+    const filename = 'atemschutznachweis_'+einsatzState.einsatz.datum+'.pdf';
+    const blob = doc.output('blob');
 
-  // ---------- Timer / Erinnerungs-Loop ----------
+    // Sofortiger Download: funktioniert auf Android/Chrome und Safari/iPad
+    // als normale lokale Datei (Downloads/Dateien – je nach System).
+    try{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    }catch(e){
+      console.warn('PDF-Download konnte nicht gestartet werden:', e);
+    }
+
+    // Zusätzlich als lokale Kopie in IndexedDB ablegen. Dadurch bleibt der
+    // Detailbericht auch dann lokal erhalten, wenn der Browser den Download
+    // nicht direkt in den Downloads-Ordner legt.
+    try{
+      if(einsatzState.einsatz && einsatzState.einsatz.id){
+        await idbSet(PDF_HISTORY_KEY + einsatzState.einsatz.id, {
+          filename,
+          savedAt: Date.now(),
+          blob
+        });
+      }
+    }catch(e){
+      console.warn('Lokale PDF-Kopie konnte nicht gespeichert werden:', e);
+    }
+
+    return true;
+  }
+ ---------- Timer / Erinnerungs-Loop ----------
   const warned = {};
   function tickWarnings(){
     if(!state) return;
