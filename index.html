@@ -9,8 +9,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Atemschutzüberwachung – v22</title>
+<title>Atemschutzüberwachung – v23</title>
 <script src="./jsQR.js"></script>
+<script src="./qrcode-generator.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -194,6 +195,8 @@
   function getRole(){ return localStorage.getItem(ROLE_KEY) || ''; }
   function setRole(role){ localStorage.setItem(ROLE_KEY, role); }
   function roleLabel(role=getRole()){ return ROLE_LABELS[role] || 'Benutzer'; }
+function canEdit(){ const r=getRole(); return r==='ueberwachung' || r==='fuehrung' || r==='admin'; }
+function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r==='beobachter'; }
   function isPermanentSession(session=currentSession){ return !!(session?.user?.email); }
 
   function cloudClient(){
@@ -534,6 +537,60 @@
     renderDashboard();
   }
 
+  function renderLocalQr(container, data, size=300){
+    container.innerHTML='';
+    try{
+      const qr = new LocalQRCode(-1, 2); // Fehlerkorrektur H
+      qr.addData(String(data||''));
+      qr.make();
+      const count = qr.getModuleCount();
+      const quiet = 4;
+      const total = count + quiet*2;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      canvas.style.width = size+'px'; canvas.style.height = size+'px';
+      canvas.setAttribute('aria-label','Einsatz QR-Code');
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle='#fff'; ctx.fillRect(0,0,size,size);
+      const cell = size / total;
+      ctx.fillStyle='#000';
+      for(let r=0;r<count;r++){
+        for(let c=0;c<count;c++){
+          if(qr.isDark(r,c)){
+            const x=Math.round((c+quiet)*cell);
+            const y=Math.round((r+quiet)*cell);
+            const x2=Math.round((c+quiet+1)*cell);
+            const y2=Math.round((r+quiet+1)*cell);
+            ctx.fillRect(x,y,x2-x,y2-y);
+          }
+        }
+      }
+      container.appendChild(canvas);
+    }catch(err){
+      console.error('Lokaler QR-Code konnte nicht erzeugt werden:',err);
+      container.innerHTML='<div style="padding:30px;color:#b91c1c;">QR-Code konnte nicht erzeugt werden.</div>';
+    }
+  }
+
+  function openEinsatzQrModal(){
+    const code=state?.einsatz?.code;
+    if(!code) return;
+    const overlay=document.createElement('div');
+    overlay.className='overlay';
+    overlay.innerHTML=`<div class="modal" style="text-align:center;max-width:520px;">
+      <h2>Einsatz beitreten</h2>
+      <p style="color:var(--text-dim);">Auf dem anderen Tablet einfach <b>QR-Code scannen</b> auswählen.</p>
+      <div id="einsatz-qr-local" style="background:#fff;border-radius:14px;padding:12px;display:inline-block;margin:10px 0;"></div>
+      <div style="font-size:30px;font-weight:900;letter-spacing:6px;margin:4px 0 12px;">${esc(code)}</div>
+      <div style="color:var(--text-dim);font-size:12px;">Einsatz-Code</div>
+      <div style="color:var(--text-dim);font-size:11px;margin-top:8px;">QR-Code wird vollständig offline auf diesem Gerät erzeugt.</div>
+      <div class="modal-actions"><button class="btn primary" id="qr-close">Schließen</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    renderLocalQr(overlay.querySelector('#einsatz-qr-local'),'ASUE-EINSATZ:'+code,300);
+    overlay.querySelector('#qr-close').onclick=()=>overlay.remove();
+  }
+
   function renderSetup(){
     app.innerHTML = `
       <div class="setup-card">
@@ -544,7 +601,10 @@
         <button class="btn primary" style="width:100%" id="btn-start-einsatz">Einsatz starten</button>
         <div style="text-align:center;color:var(--text-dim);font-size:12px;margin:14px 0 8px;">oder</div>
         <div class="field"><label>Bestehendem Einsatz beitreten</label><input id="join-code" class="code-input" maxlength="6" placeholder="ABC123"></div>
-        <button class="btn" style="width:100%" id="btn-join-einsatz">Einsatz beitreten</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" style="flex:1" id="btn-join-einsatz">Einsatz beitreten</button>
+          <button class="btn primary" style="flex:1" id="btn-scan-einsatz-qr">📷 QR-Code scannen</button>
+        </div>
         <div id="setup-msg" style="color:var(--red);font-size:13px;margin-top:12px;min-height:18px;"></div>
         <div style="margin-top:16px;text-align:center;color:var(--text-dim);font-size:11px;">Rolle auf diesem Tablet: ${esc(roleLabel())}</div>
       </div>`;
@@ -576,6 +636,12 @@
       try{ state=await cloudJoinByCode(code); render(); }
       catch(e){ console.error(e); btn.disabled=false; btn.textContent='Einsatz beitreten'; msg.textContent=e.message||'Einsatz konnte nicht geladen werden.'; }
     };
+    document.getElementById('btn-scan-einsatz-qr').onclick=()=>openScanModal(async raw=>{
+      const value=String(raw||'').trim();
+      const code=value.toUpperCase().startsWith('ASUE-EINSATZ:') ? value.split(':').slice(1).join(':').trim().toUpperCase() : value.toUpperCase();
+      document.getElementById('join-code').value=code;
+      document.getElementById('btn-join-einsatz').click();
+    });
   }
 
   function captureLogScrollPositions(){
@@ -605,9 +671,9 @@
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 22.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 23.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
         <div style="display:flex; gap:8px;">
-          <button class="btn small" id="btn-role">${esc(roleLabel())}</button><button class="btn small" id="btn-history">Gespeicherte Einsätze</button>
+          <button class="btn small" id="btn-role">${esc(roleLabel())}</button><button class="btn small" id="btn-history">Gespeicherte Einsätze</button><button class="btn small" id="btn-einsatz-qr">QR-Code</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
           <button class="btn small danger" id="btn-einsatz-beenden">Einsatz beenden</button>
         </div>
@@ -619,7 +685,7 @@
       </div>
 
       <div style="margin:16px 0;">
-        <button class="btn primary" id="btn-add-trupp">+ Trupp vorbereiten</button>
+        ${canEdit()?'<button class="btn primary" id="btn-add-trupp">+ Trupp vorbereiten</button>':'<div class="login-note">Nur Atemschutzüberwachung und Gruppenführer können den Einsatz bearbeiten.</div>'}
       </div>
 
       ${prepared.length ? '<h2 class="section-title">Vorbereitet — noch nicht gestartet</h2><div class="grid" id="grid-prep"></div>' : ''}
@@ -627,11 +693,12 @@
       <div class="grid" id="grid-active"></div>
       ${ended.length ? '<h2 class="section-title">Beendet</h2><div class="grid" id="grid-ended"></div>' : ''}
     `;
-    document.getElementById('btn-add-trupp').onclick = openAddTruppModal;
+    const addBtn=document.getElementById('btn-add-trupp'); if(addBtn) addBtn.onclick = openAddTruppModal;
+    document.getElementById('btn-einsatz-qr').onclick = openEinsatzQrModal;
     document.getElementById('btn-role').onclick = ()=>renderRolePicker();
     const btnEinsatzBeenden = document.getElementById('btn-einsatz-beenden');
-    btnEinsatzBeenden.disabled = active.length > 0;
-    btnEinsatzBeenden.title = active.length > 0 ? 'Erst alle aktiven Trupps beenden.' : 'Einsatz beenden';
+    btnEinsatzBeenden.disabled = active.length > 0 || !canEdit();
+    btnEinsatzBeenden.title = !canEdit() ? 'Nur Atemschutzüberwachung und Gruppenführer dürfen den Einsatz beenden.' : (active.length > 0 ? 'Erst alle aktiven Trupps beenden.' : 'Einsatz beenden');
     btnEinsatzBeenden.onclick = ()=> beendeEinsatz();
     document.getElementById('btn-nachweis').onclick = openNachweisModal;
     document.getElementById('btn-history').onclick = openHistoryModal;
@@ -690,9 +757,8 @@
     if(t.status === 'vorbereitet'){
       const startReady = t.mitglieder.length>0 && t.mitglieder.every(m=>String(m.name||'').trim()!=='');
       timerHtml = `<div class="timer" style="color:var(--text-dim); font-size:20px;">Noch nicht gestartet</div>`;
-      actions = `<button class="btn small primary act-start" ${startReady?'':'disabled'} title="${startReady?'Trupp starten':'Start erst möglich, wenn für alle Mitglieder ein Name eingetragen ist.'}">Start (Luft anschließen)</button>
-                  <button class="btn small ghost act-edit">Bearbeiten</button>
-                  <button class="btn small ghost act-del">Löschen</button>`;
+      actions = `<button class="btn small primary act-start" ${canEdit()?'':'disabled'} ${startReady?'':'disabled'} title="${startReady?'Trupp starten':'Start erst möglich, wenn für alle Mitglieder ein Name eingetragen ist.'}">Start (Luft anschließen)</button>
+                  ${canEdit()?'<button class="btn small ghost act-edit">Bearbeiten</button><button class="btn small ghost act-del">Löschen</button>':''}`;
     } else {
       const elapsedSec = t.endzeit ? (t.endzeit - t.start)/1000 : (Date.now() - t.start)/1000;
       const totalSec = t.erwarteteZeitMin*60;
@@ -716,22 +782,22 @@
       }
 
       if(t.status === 'aktiv'){
-        actions = `
+        actions = canEdit() ? `
           <button class="btn small ghost act-edit">Bearbeiten</button>
           <button class="btn small primary act-event">Ereignis dokumentieren</button>
           <button class="btn small violet act-druck">Druck erfassen</button>
           ${!t.zielzeit ? '<button class="btn small good act-ziel">Einsatzziel erreicht</button>':''}
           ${!t.rueckzugzeit ? '<button class="btn small warnbtn act-rueckzug">Rückzug begonnen</button>':''}
-          <button class="btn small danger act-ende">Einsatzende</button>`;
+          <button class="btn small danger act-ende">Einsatzende</button>` : '<div style="color:var(--text-dim);font-size:12px;padding:6px 0;">Nur Lesemodus</div>';
       } else {
-        actions = `<button class="btn small ghost act-del">Löschen</button>`;
+        actions = canEdit() ? `<button class="btn small ghost act-del">Löschen</button>` : '<div style="color:var(--text-dim);font-size:12px;">Nur Lesemodus</div>';
       }
     }
 
     const faelligClass = (t.status==='aktiv' && t.druckReminderActive) ? 'druck-faellig' : '';
     const faelligBadge = (t.status==='aktiv' && t.druckReminderActive) ? '<span class="badge druck">Druckabfrage fällig</span>' : '';
     const sofortClass = (t.status==='aktiv' && t.rueckzugSofort) ? 'sofort' : '';
-    const sofortBanner = (t.status==='aktiv' && t.rueckzugSofort) ? `<div class="sofort-banner">⚠ RÜCKZUG SOFORT — Druck unter Sicherheitsreserve<button class="btn small act-sofort-ack">Bestätigen</button></div>` : '';
+    const sofortBanner = (t.status==='aktiv' && t.rueckzugSofort) ? `<div class="sofort-banner">⚠ RÜCKZUG SOFORT — Druck unter Sicherheitsreserve${canEdit()?'<button class="btn small act-sofort-ack">Bestätigen</button>':''}</div>` : '';
 
     return `
       <div class="trupp status-${status} ${faelligClass} ${sofortClass}" id="card-${t.id}">
