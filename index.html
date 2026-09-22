@@ -519,12 +519,17 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
   async function saveState(state){
     const json = JSON.stringify(state);
-    try{ await idbSet(STORE_KEY, state); }catch(e){ console.warn('IndexedDB save failed', e); }
+    // WICHTIG: Kein Persistenzweg darf die Bedienung blockieren.
+    // IndexedDB und Shared Storage laufen bewusst im Hintergrund.
+    // localStorage wird synchron geschrieben und dient als sofortiger Fallback.
     try{ localStorage.setItem(STORE_KEY, json); }catch(e){ console.warn('local save failed', e); }
-    try{ if(window.storage && window.storage.set) await window.storage.set(STORE_KEY, json, true); }catch(e){ console.warn('shared save failed', e); }
+    idbSet(STORE_KEY, state).catch(e=>console.warn('IndexedDB save failed', e));
+    try{
+      if(window.storage && window.storage.set){
+        Promise.resolve(window.storage.set(STORE_KEY, json, true)).catch(e=>console.warn('shared save failed', e));
+      }
+    }catch(e){ console.warn('shared save failed', e); }
     // Cloud-Sync darf die lokale Bedienung niemals blockieren.
-    // Lokal ist der Einsatz sofort gespeichert; die Cloud wird im Hintergrund
-    // aktualisiert und ein Offline-/Netzwerkfehler darf keinen Button blockieren.
     if(!applyingCloudState && state?.einsatz?.cloudId){
       cloudSaveState(state).catch(e=>console.warn('cloud save failed', e));
     }
