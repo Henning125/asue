@@ -1862,7 +1862,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
     return true;
   }
- ---------- Timer / Erinnerungs-Loop ----------
+  // ---------- Timer / Erinnerungs-Loop ----------
   const warned = {};
   function tickWarnings(){
     if(!state) return;
