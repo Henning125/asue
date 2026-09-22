@@ -333,14 +333,34 @@
     };
   }
 
+  function captureLogScrollPositions(){
+    const positions = {};
+    document.querySelectorAll('.trupp .log-mini').forEach(el=>{
+      const card = el.closest('.trupp');
+      if(card && card.id) positions[card.id] = el.scrollTop;
+    });
+    return positions;
+  }
+
+  function restoreLogScrollPositions(positions){
+    if(!positions) return;
+    requestAnimationFrame(()=>{
+      Object.entries(positions).forEach(([id, top])=>{
+        const el = document.querySelector('#'+CSS.escape(id)+' .log-mini');
+        if(el) el.scrollTop = top;
+      });
+    });
+  }
+
   function renderDashboard(){
+    const logScrollPositions = captureLogScrollPositions();
     const prepared = state.trupps.filter(t=>t.status==='vorbereitet');
     const active = state.trupps.filter(t=>t.status==='aktiv');
     const ended = state.trupps.filter(t=>t.status==='beendet');
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 18.0</span></div></div><span class="sub">Live</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 20.0</span></div></div><span class="sub">Live</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-history">Gespeicherte Einsätze</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
@@ -387,6 +407,7 @@
       g.innerHTML = ended.map(truppCard).join('');
       bindCard(ended);
     }
+    restoreLogScrollPositions(logScrollPositions);
   }
 
   function bindCard(list){
@@ -1282,12 +1303,12 @@
         doc.text('Zeit', 18, y); doc.text('Mitglied', 46, y); doc.text('Druck', 88, y); doc.text('Anlass', 108, y); doc.text('Hinweis', 148, y);
         y+=1; doc.setDrawColor(210); doc.line(14, y, 196, y); y+=4;
         doc.setFont(undefined,'normal');
-        const kontextLabel = {normal:'Zwischenwert', ziel:'Einsatzziel', rueckzug:'Rückzug', undefined:'Zwischenwert'};
+        const kontextLabel = {start:'Startdruck', normal:'Zwischenwert', ziel:'Einsatzziel', rueckzug:'Rückzug', ende:'Einsatzende', undefined:'Zwischenwert'};
         t.druckwerte.forEach(entry=>{
           entry.werte.forEach(w=>{
             ensureSpace(4.6);
             const schwelle = Number(t.rueckzugSchwelle);
-            const warn = entry.kontext !== 'start' && Number.isFinite(schwelle) && w.druck <= schwelle ? 'RÜCKZUG SOFORT!' : '';
+            const warn = entry.kontext !== 'start' && entry.kontext !== 'ende' && Number.isFinite(schwelle) && w.druck <= schwelle ? 'RÜCKZUG SOFORT!' : '';
             doc.setFontSize(9);
             doc.text(new Date(entry.zeit).toLocaleTimeString('de-DE'), 18, y);
             doc.text(String(w.name), 46, y);
@@ -1340,11 +1361,13 @@
     });
     if(changed) saveState(state);
     if(document.getElementById('grid-active') || document.getElementById('grid-prep')){
+      const logScrollPositions = captureLogScrollPositions();
       state.trupps.forEach(t=>{
         const card = document.getElementById('card-'+t.id);
         if(card) card.outerHTML = truppCard(t);
       });
       bindCard(state.trupps);
+      restoreLogScrollPositions(logScrollPositions);
     }
   }
   setInterval(tickWarnings, 1000);
