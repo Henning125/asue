@@ -1,4 +1,4 @@
-const CACHE = 'atemschutz-pwa-v20';
+const CACHE = 'atemschutz-pwa-v22';
 const APP_SHELL = [
   './',
   './index.html',
@@ -7,8 +7,8 @@ const APP_SHELL = [
   './icon-512.png','./jsQR.js'
 ];
 const LIBS = [
-  
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
 ];
 
 self.addEventListener('install', event => {
