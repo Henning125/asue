@@ -9,7 +9,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Atemschutzüberwachung – v17</title>
+<title>Atemschutzüberwachung – v18</title>
 <script src="./jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
@@ -118,6 +118,14 @@
   .druck-summary .low{color:var(--red); font-weight:700;}
 
   .trupp-actions{display:flex; gap:8px; flex-wrap:wrap;}
+  .quick-buttons{display:flex; gap:7px; flex-wrap:wrap; margin-top:7px;}
+  .quick-btn{padding:9px 12px; border-radius:9px; font-size:13px; font-weight:700; background:var(--panel-2); color:var(--text); border:1px solid var(--line);}
+  .quick-btn.selected{background:var(--blue); border-color:var(--blue); color:#fff;}
+  .quick-btn.event{background:rgba(63,138,224,.12); border-color:rgba(63,138,224,.45);}
+  .quick-btn.event:active,.quick-btn:active{transform:scale(.97);}
+  .event-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px;}
+  .event-grid .quick-btn{min-height:48px;}
+  @media (max-width:600px){ .event-grid{grid-template-columns:1fr 1fr;} }
 
   .log-mini{margin-top:10px; font-size:11px; color:var(--text-dim); border-top:1px solid var(--line); padding-top:8px; max-height:70px; overflow:auto;}
 
@@ -332,7 +340,7 @@
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 16.0</span></div></div><span class="sub">Live</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 18.0</span></div></div><span class="sub">Live</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-history">Gespeicherte Einsätze</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
@@ -390,6 +398,7 @@
       const z = scope.querySelector('.act-ziel'); if(z) z.onclick = ()=>openDruckModal(t.id, 'ziel');
       const r = scope.querySelector('.act-rueckzug'); if(r) r.onclick = ()=>openDruckModal(t.id, 'rueckzug');
       const e = scope.querySelector('.act-ende'); if(e) e.onclick = ()=>openDruckModal(t.id, 'ende');
+      const ev = scope.querySelector('.act-event'); if(ev) ev.onclick = ()=>openEreignisModal(t.id);
       const del = scope.querySelector('.act-del'); if(del) del.onclick = ()=>deleteTrupp(t.id);
       const edit = scope.querySelector('.act-edit'); if(edit) edit.onclick = ()=>openEditTruppModal(t.id);
       const ack = scope.querySelector('.act-sofort-ack'); if(ack) ack.onclick = ()=>ackSofort(t.id);
@@ -442,6 +451,7 @@
       if(t.status === 'aktiv'){
         actions = `
           <button class="btn small ghost act-edit">Bearbeiten</button>
+          <button class="btn small primary act-event">Ereignis dokumentieren</button>
           <button class="btn small violet act-druck">Druck erfassen</button>
           ${!t.zielzeit ? '<button class="btn small good act-ziel">Einsatzziel erreicht</button>':''}
           ${!t.rueckzugzeit ? '<button class="btn small warnbtn act-rueckzug">Rückzug begonnen</button>':''}
@@ -459,7 +469,7 @@
     return `
       <div class="trupp status-${status} ${faelligClass} ${sofortClass}" id="card-${t.id}">
         <div class="trupp-head">
-          <div><h3>${esc(t.name)}</h3>${t.funkruf?`<div style="color:var(--text-dim);font-size:13px;">Funkruf: ${esc(t.funkruf)}</div>`:''}</div>
+          <div><h3>${esc(t.name)}</h3>${t.funkruf?`<div style="color:var(--text-dim);font-size:13px;">Funkruf: ${esc(t.funkruf)}</div>`:''}${t.auftrag?`<div style="color:var(--blue);font-size:13px;font-weight:700;margin-top:3px;">Auftrag: ${esc(t.auftrag)}</div>`:''}</div>
           <div style="display:flex; gap:6px;">${faelligBadge}<span class="badge ${status}">${badgeMap[status]}</span></div>
         </div>
         ${sofortBanner}
@@ -541,7 +551,7 @@
 
   // ---------- Trupp vorbereiten (kein Start) ----------
   function openAddTruppModal(){
-    const tmp = { id: uid(), name:'', funkruf:'', erwarteteZeitMin:30, mitglieder:[{name:'',startdruck:null},{name:'',startdruck:null}] };
+    const tmp = { id: uid(), name:'', funkruf:'', auftrag:'', erwarteteZeitMin:30, mitglieder:[{name:'',startdruck:null},{name:'',startdruck:null}] };
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
     overlay.innerHTML = `
@@ -549,6 +559,7 @@
         <h2>Trupp vorbereiten</h2>
         <div class="field"><label>Truppbezeichnung</label><input id="m-name" placeholder="z. B. Trupp 1 / Angriffstrupp"></div>
         <div class="field"><label>Funkruf des Trupps <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label><input id="m-funkruf" placeholder="z. B. Angriffstrupp 1"></div>
+        <div class="field"><label>Auftrag</label><div id="m-auftrag-buttons" class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG'].map(x=>`<button type="button" class="quick-btn" data-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="m-auftrag" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
         <div class="field"><label>Voraussichtliche Einsatzzeit (Minuten)</label><input id="m-zeit" type="number" min="5" step="5" value="30"></div>
         <div id="members-wrap"></div>
         <button class="btn small ghost" id="m-add-member">+ Weiteres Mitglied</button>
@@ -582,6 +593,8 @@
     overlay.querySelector('#m-add-member').onclick = ()=>{ tmp.mitglieder.push({name:'',startdruck:null}); renderMembers(); };
     overlay.querySelector('#m-name').oninput = e=> tmp.name = e.target.value;
     overlay.querySelector('#m-funkruf').oninput = e=> tmp.funkruf = e.target.value;
+    overlay.querySelector('#m-auftrag').oninput = e=> { tmp.auftrag = e.target.value; overlay.querySelectorAll('[data-auftrag]').forEach(b=>b.classList.toggle('selected', b.dataset.auftrag===tmp.auftrag)); };
+    overlay.querySelectorAll('[data-auftrag]').forEach(b=>b.onclick=()=>{ tmp.auftrag=b.dataset.auftrag; overlay.querySelector('#m-auftrag').value=tmp.auftrag; overlay.querySelectorAll('[data-auftrag]').forEach(x=>x.classList.toggle('selected',x===b)); });
     overlay.querySelector('#m-zeit').oninput = e=> tmp.erwarteteZeitMin = +e.target.value || 30;
     overlay.querySelector('#m-cancel').onclick = ()=> overlay.remove();
     overlay.querySelector('#m-save').onclick = async ()=>{
@@ -590,6 +603,7 @@
         id: tmp.id,
         name: tmp.name.trim(),
         funkruf: tmp.funkruf.trim(),
+        auftrag: tmp.auftrag.trim(),
         erwarteteZeitMin: tmp.erwarteteZeitMin,
         mitglieder: tmp.mitglieder.filter(m=>m.name.trim()),
         status: 'vorbereitet',
@@ -616,6 +630,7 @@
     const tmp = {
       name:t.name || '',
       funkruf:t.funkruf || '',
+      auftrag:t.auftrag || '',
       erwarteteZeitMin:t.erwarteteZeitMin || 30,
       mitglieder:t.mitglieder.map(m=>({name:m.name || '', startdruck:m.startdruck!=null?m.startdruck:null}))
     };
@@ -626,6 +641,7 @@
         <h2>Trupp bearbeiten</h2>
         <div class="field"><label>Truppbezeichnung</label><input id="e-name" value="${esc(tmp.name)}"></div>
         <div class="field"><label>Funkruf des Trupps <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label><input id="e-funkruf" value="${esc(tmp.funkruf)}"></div>
+        <div class="field"><label>Auftrag</label><div id="e-auftrag-buttons" class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG'].map(x=>`<button type="button" class="quick-btn ${tmp.auftrag===x?'selected':''}" data-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="e-auftrag" value="${esc(tmp.auftrag)}" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
         <div class="field"><label>Voraussichtliche Einsatzzeit (Minuten)</label><input id="e-zeit" type="number" min="5" step="5" value="${tmp.erwarteteZeitMin}"></div>
         <div id="edit-members-wrap"></div>
         <button class="btn small ghost" id="e-add-member">+ Weiteres Mitglied</button>
@@ -654,6 +670,8 @@
     renderEditMembers();
     overlay.querySelector('#e-name').oninput=e=>tmp.name=e.target.value;
     overlay.querySelector('#e-funkruf').oninput=e=>tmp.funkruf=e.target.value;
+    overlay.querySelector('#e-auftrag').oninput=e=>{tmp.auftrag=e.target.value;overlay.querySelectorAll('[data-auftrag]').forEach(b=>b.classList.toggle('selected',b.dataset.auftrag===tmp.auftrag));};
+    overlay.querySelectorAll('[data-auftrag]').forEach(b=>b.onclick=()=>{tmp.auftrag=b.dataset.auftrag;overlay.querySelector('#e-auftrag').value=tmp.auftrag;overlay.querySelectorAll('[data-auftrag]').forEach(x=>x.classList.toggle('selected',x===b));});
     overlay.querySelector('#e-zeit').oninput=e=>tmp.erwarteteZeitMin=+e.target.value||30;
     overlay.querySelector('#e-add-member').onclick=()=>{tmp.mitglieder.push({name:'',startdruck:null});renderEditMembers();};
     overlay.querySelector('#e-cancel').onclick=()=>overlay.remove();
@@ -664,6 +682,7 @@
       const oldNames=t.mitglieder.map(m=>m.name);
       t.name=tmp.name.trim();
       t.funkruf=tmp.funkruf.trim();
+      t.auftrag=tmp.auftrag.trim();
       t.erwarteteZeitMin=tmp.erwarteteZeitMin;
       // Keep pressure history and calculated thresholds consistent when member names change.
       const renameMap={};
@@ -721,6 +740,7 @@
       <div class="modal">
         <h2>${esc(t.name)} — Luft anschließen</h2>
         <p style="color:var(--text-dim); font-size:13px; margin-top:-8px;">Startdrücke erfassen. Der Timer beginnt erst mit "Start".</p>
+        <div class="field"><label>Auftrag</label><div class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG'].map(x=>`<button type="button" class="quick-btn ${t.auftrag===x?'selected':''}" data-start-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="sd-auftrag" value="${esc(t.auftrag||'')}" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
         <div id="druck-wrap">
           ${t.mitglieder.map((m,i)=>`
             <div class="field">
@@ -734,6 +754,9 @@
         </div>
       </div>`;
     document.body.appendChild(overlay);
+    const startAuftrag = t.auftrag || '';
+    overlay.querySelector('#sd-auftrag').oninput=e=>{t.auftrag=e.target.value;overlay.querySelectorAll('[data-start-auftrag]').forEach(b=>b.classList.toggle('selected',b.dataset.startAuftrag===t.auftrag));};
+    overlay.querySelectorAll('[data-start-auftrag]').forEach(b=>b.onclick=()=>{t.auftrag=b.dataset.startAuftrag;overlay.querySelector('#sd-auftrag').value=t.auftrag;overlay.querySelectorAll('[data-start-auftrag]').forEach(x=>x.classList.toggle('selected',x===b));});
     overlay.querySelector('#sd-cancel').onclick = ()=> overlay.remove();
     overlay.querySelector('#sd-ok').onclick = async ()=>{
       overlay.querySelectorAll('.sd-input').forEach(inp=>{
@@ -856,6 +879,41 @@
       overlay.remove(); render();
       if(context === 'ende' && typeof onDone === 'function') onDone();
     };
+  }
+
+  // ---------- Ereignisse während des Einsatzes ----------
+  function openEreignisModal(id){
+    const t = state.trupps.find(x=>x.id===id); if(!t || t.status!=='aktiv') return;
+    const events = ['Geschosswechsel nach oben','Geschosswechsel nach unten','Person gefunden','Start Brandbekämpfung','Feuer aus','Wasser Marsch','Fenster geöffnet'];
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2>${esc(t.name)} — Ereignis dokumentieren</h2>
+        <p style="color:var(--text-dim);font-size:12px;margin-top:-8px;">Ein Ereignis wird sofort mit Uhrzeit im Einsatzprotokoll gespeichert.</p>
+        <div class="event-grid">
+          ${events.map(x=>`<button type="button" class="quick-btn event" data-event="${esc(x)}">${esc(x)}</button>`).join('')}
+        </div>
+        <div class="field" style="margin-top:14px;">
+          <label>Freitext</label>
+          <input id="event-text" placeholder="Eigenes Ereignis / Lageänderung">
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="event-cancel">Abbrechen</button>
+          <button class="btn primary" id="event-save">Freitext speichern</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const save = async text=>{
+      text = String(text||'').trim();
+      if(!text){ alert('Bitte ein Ereignis auswählen oder einen Freitext eingeben.'); return; }
+      addLog(t, text);
+      await saveState(state);
+      overlay.remove(); render();
+    };
+    overlay.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>save(b.dataset.event));
+    overlay.querySelector('#event-save').onclick=()=>save(overlay.querySelector('#event-text').value);
+    overlay.querySelector('#event-cancel').onclick=()=>overlay.remove();
   }
 
   // ---------- QR Scan Modal ----------
@@ -1189,6 +1247,7 @@
       doc.line(14, y-3, 196, y-3);
       line(t.name, 14, 13, true); y+=6.5;
       if(t.funkruf){ line(`Funkruf: ${t.funkruf}`, 16, 9.5, false); y+=4.6; }
+      if(t.auftrag){ line(`Auftrag: ${t.auftrag}`, 16, 9.5, false); y+=4.6; }
 
       t.mitglieder.forEach(m=>{
         ensureSpace(5);
