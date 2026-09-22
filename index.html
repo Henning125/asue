@@ -240,10 +240,12 @@
     if(state.einsatz?.cloudId){
       check=await checkOtherCaretakers();
       if(!check.known && navigator.onLine){
-        if(!confirm('Die Betreuung durch andere Geräte konnte gerade nicht geprüft werden. Einsatz trotzdem auf diesem Gerät verlassen?')) return;
+        alert('Einsatz verlassen nicht möglich. Die Betreuung durch ein anderes Gerät konnte gerade nicht sicher geprüft werden.');
+        return;
       }
       if(check.known && check.count===0){
-        if(!confirm('Auf diesem Einsatz ist aktuell kein anderes Gerät als Atemschutzüberwachung oder Gruppenführer als aktiv betreuend erkannt. Wirklich verlassen?')) return;
+        alert('Einsatz verlassen nicht möglich. Auf diesem Einsatz ist aktuell kein anderes Gerät als Atemschutzüberwachung oder Gruppenführer aktiv betreuend erkannt. Bitte übergib die Betreuung zuerst an ein anderes Gerät.');
+        return;
       }
     }
     try{
@@ -915,7 +917,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 35.2</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 1.0.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-role">${esc(roleLabel())}</button><button class="btn small" id="btn-history">Gespeicherte Einsätze</button><button class="btn small" id="btn-einsatz-qr">QR-Code</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
