@@ -197,6 +197,71 @@
   function getRole(){ return localStorage.getItem(ROLE_KEY) || ''; }
   function setRole(role){ localStorage.setItem(ROLE_KEY, role); }
   function roleLabel(role=getRole()){ return ROLE_LABELS[role] || 'Benutzer'; }
+  function actionRoleLabel(role=getRole()){
+    if(role==='fuehrung') return 'Gruppenführer';
+    if(role==='ueberwachung') return 'Atemschutzüberwachung';
+    if(role==='admin') return 'Administrator';
+    if(role==='einsatzleiter') return 'Einsatzleiter';
+    if(role==='beobachter') return 'Beobachter';
+    return roleLabel(role);
+  }
+
+  async function touchParticipant(){
+    const client=cloudClient();
+    if(!client || !currentSession || !state?.einsatz?.cloudId || !navigator.onLine) return;
+    const {error}=await client.from('einsatz_teilnehmer')
+      .update({zuletzt_aktiv:new Date().toISOString()})
+      .eq('einsatz_id',state.einsatz.cloudId)
+      .eq('user_id',currentSession.user.id);
+    if(error) console.warn('Teilnehmer-Heartbeat fehlgeschlagen:',error);
+  }
+
+  async function checkOtherCaretakers(){
+    const client=cloudClient();
+    if(!client || !currentSession || !state?.einsatz?.cloudId) return {known:false,count:0,participants:[]};
+    if(!navigator.onLine) return {known:false,count:0,participants:[]};
+    const cutoff=new Date(Date.now()-120000).toISOString();
+    const {data,error}=await client.from('einsatz_teilnehmer')
+      .select('user_id,rolle,zuletzt_aktiv')
+      .eq('einsatz_id',state.einsatz.cloudId)
+      .in('rolle',['ueberwachung','fuehrung'])
+      .neq('user_id',currentSession.user.id)
+      .gte('zuletzt_aktiv',cutoff);
+    if(error){
+      console.warn('Betreuungsprüfung fehlgeschlagen:',error);
+      return {known:false,count:0,participants:[]};
+    }
+    return {known:true,count:(data||[]).length,participants:data||[]};
+  }
+
+  async function leaveEinsatz(){
+    if(!state) return;
+    let check={known:false,count:0,participants:[]};
+    if(state.einsatz?.cloudId){
+      check=await checkOtherCaretakers();
+      if(!check.known && navigator.onLine){
+        if(!confirm('Die Betreuung durch andere Geräte konnte gerade nicht geprüft werden. Einsatz trotzdem auf diesem Gerät verlassen?')) return;
+      }
+      if(check.known && check.count===0){
+        if(!confirm('Auf diesem Einsatz ist aktuell kein anderes Gerät als Atemschutzüberwachung oder Gruppenführer als aktiv betreuend erkannt. Wirklich verlassen?')) return;
+      }
+    }
+    try{
+      const client=cloudClient();
+      if(client && currentSession && state.einsatz?.cloudId && navigator.onLine){
+        const {error}=await client.from('einsatz_teilnehmer')
+          .update({zuletzt_aktiv:new Date(0).toISOString()})
+          .eq('einsatz_id',state.einsatz.cloudId)
+          .eq('user_id',currentSession.user.id);
+        if(error) console.warn('Teilnehmer konnte nicht abgemeldet werden:',error);
+        if(cloudChannel){ try{ await client.removeChannel(cloudChannel); }catch(e){} cloudChannel=null; }
+      }
+    }catch(e){ console.warn('Einsatz verlassen – Cloud-Abmeldung fehlgeschlagen:',e); }
+    state=null;
+    await saveState(null);
+    render();
+  }
+
 function canEdit(){ const r=getRole(); return r==='ueberwachung' || r==='fuehrung' || r==='admin'; }
 function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r==='beobachter'; }
   function needsEditPin(target){
@@ -611,7 +676,13 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     return 'ok';
   }
 
-  function addLog(t, text){ t.log.push({zeit: Date.now(), text}); }
+  function addLog(t, text){
+    const actor = actionRoleLabel();
+    const suffix = ` (${actor})`;
+    const clean = String(text||'');
+    t.log = Array.isArray(t.log) ? t.log : [];
+    t.log.push({zeit: Date.now(), text: clean.endsWith(suffix) ? clean : clean + suffix});
+  }
 
   const app = document.getElementById('app');
 
@@ -844,10 +915,11 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 34.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 35.2</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-role">${esc(roleLabel())}</button><button class="btn small" id="btn-history">Gespeicherte Einsätze</button><button class="btn small" id="btn-einsatz-qr">QR-Code</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
+          <button class="btn small" id="btn-einsatz-verlassen">Einsatz verlassen</button>
           <button class="btn small danger" id="btn-einsatz-beenden">Einsatz beenden</button>
         </div>
       </header>
@@ -869,6 +941,8 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     const addBtn=document.getElementById('btn-add-trupp'); if(addBtn) addBtn.onclick = openAddTruppModal;
     document.getElementById('btn-einsatz-qr').onclick = openEinsatzQrModal;
     document.getElementById('btn-role').onclick = ()=>renderRolePicker();
+    const btnEinsatzVerlassen = document.getElementById('btn-einsatz-verlassen');
+    btnEinsatzVerlassen.onclick = ()=>leaveEinsatz();
     const btnEinsatzBeenden = document.getElementById('btn-einsatz-beenden');
     btnEinsatzBeenden.disabled = active.length > 0 || !canEdit();
     btnEinsatzBeenden.title = !canEdit() ? 'Nur Atemschutzüberwachung und Gruppenführer dürfen den Einsatz beenden.' : (active.length > 0 ? 'Erst alle aktiven Trupps beenden.' : 'Einsatz beenden');
@@ -1899,6 +1973,8 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
   }
   setInterval(tickWarnings, 1000);
   setInterval(()=>syncOfflineEinsatzIfPossible(), 15000);
+  setInterval(()=>touchParticipant(), 30000);
+  window.addEventListener('online', ()=>{ touchParticipant(); refreshCloudStateIfAvailable(); });
 
   // Offline-first: lokaler Speicher bleibt aktiv; bei bestehender Verbindung
   // werden Cloud-Einsätze per Supabase Realtime zwischen den Geräten synchronisiert.
