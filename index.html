@@ -782,7 +782,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 32.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 33.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-role">${esc(roleLabel())}</button><button class="btn small" id="btn-history">Gespeicherte Einsätze</button><button class="btn small" id="btn-einsatz-qr">QR-Code</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
@@ -859,7 +859,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     const status = computeStatus(t);
     const badgeMap = {prep:'Vorbereitet', ok:'Normal', warn1:'1/3 erreicht', warn2:'2/3 – Rückzug prüfen!', ended:'Beendet'};
     const membersHtml = t.mitglieder.map(m=>`<div><b>${esc(m.name)||'—'}</b>${m.startdruck!=null?(' · Start: '+esc(m.startdruck)+' bar'):''}</div>`).join('');
-    const logHtml = t.log.slice(-4).map(l=>`<div>${fmtTime(new Date(l.zeit))} — ${esc(l.text)}</div>`).join('');
+    const logHtml = (t.log || []).map(l=>`<div>${fmtTime(new Date(l.zeit))} — ${esc(l.text)}</div>`).join('');
 
     let timerHtml = '';
     let druckSummary = '';
