@@ -1,4 +1,4 @@
-const CACHE = 'atemschutz-pwa-v25';
+const CACHE = 'atemschutz-pwa-v27';
 const APP_SHELL = [
   './',
   './index.html',

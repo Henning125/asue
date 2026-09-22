@@ -175,6 +175,7 @@
   const HISTORY_KEY = 'atemschutz:einsaetze';
   const ROLE_KEY = 'atemschutz:rolle';
   const DRUCK_INTERVAL_MIN = 10; // Erinnerung alle 10 Minuten
+  const EDIT_ROLE_PIN = '0000'; // Schutz beim Wechsel aus reinen Lesemodus-Rollen
 
   // Supabase / Mehrgeräte-Synchronisierung
   const SUPABASE_URL = 'https://ikusrupvosxuoxljsaii.supabase.co';
@@ -197,6 +198,51 @@
   function roleLabel(role=getRole()){ return ROLE_LABELS[role] || 'Benutzer'; }
 function canEdit(){ const r=getRole(); return r==='ueberwachung' || r==='fuehrung' || r==='admin'; }
 function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r==='beobachter'; }
+  function needsEditPin(target){
+    return isReadOnlyRole() && (target==='ueberwachung' || target==='fuehrung');
+  }
+
+  function openEditRolePin(target, onSuccess){
+    const overlay=document.createElement('div');
+    overlay.className='overlay';
+    overlay.innerHTML=`<div class="modal" style="max-width:420px;">
+      <h2>🔒 Bearbeitungsrolle geschützt</h2>
+      <p style="color:var(--text-dim);">Der Wechsel zu <b>${esc(roleLabel(target))}</b> ist nur mit PIN möglich.</p>
+      <div class="field"><label>PIN</label><input id="role-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="••••"></div>
+      <div id="role-pin-msg" style="color:var(--red);font-size:13px;min-height:18px;"></div>
+      <div class="modal-actions"><button class="btn ghost" id="role-pin-cancel">Abbrechen</button><button class="btn primary" id="role-pin-ok">Freigeben</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const input=overlay.querySelector('#role-pin');
+    const msg=overlay.querySelector('#role-pin-msg');
+    const close=()=>overlay.remove();
+    const verify=async()=>{
+      if(input.value===EDIT_ROLE_PIN){
+        close();
+        setRole(target);
+        await syncProfileRole();
+        onSuccess?.();
+      }else{
+        msg.textContent='Falsche PIN.';
+        input.value='';
+        input.focus();
+      }
+    };
+    overlay.querySelector('#role-pin-cancel').onclick=close;
+    overlay.querySelector('#role-pin-ok').onclick=verify;
+    input.onkeydown=e=>{if(e.key==='Enter') verify(); if(e.key==='Escape') close();};
+    setTimeout(()=>input.focus(),50);
+  }
+
+  async function selectRole(role){
+    if(needsEditPin(role)){
+      openEditRolePin(role, ()=>render());
+      return;
+    }
+    setRole(role);
+    await syncProfileRole();
+    render();
+  }
   function isPermanentSession(session=currentSession){ return !!(session?.user?.email); }
 
   function cloudClient(){
@@ -286,8 +332,32 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     if(cloudChannel){ try{ await client.removeChannel(cloudChannel); }catch(e){} }
     cloudChannel=client.channel('einsatz-'+cloudId)
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'einsaetze',filter:'id=eq.'+cloudId},payload=>{
+        if(applyingCloudState) return;
+
+        // Einsatz wurde auf einem anderen Gerät beendet:
+        // Alle verbundenen Geräte verlassen den gemeinsamen Einsatz
+        // ebenfalls und legen den letzten Stand lokal ins Archiv.
+        if(payload.new?.status === 'beendet'){
+          const remote=payload.new?.zustand;
+          if(remote){
+            remote.einsatz=remote.einsatz||{};
+            remote.einsatz.cloudId=cloudId;
+            remote.einsatz.code=payload.new.einsatz_code || remote.einsatz.code;
+            saveHistory(remote);
+          }
+          applyingCloudState=true;
+          state=null;
+          saveState(null).finally(async()=>{
+            applyingCloudState=false;
+            if(cloudChannel){ try{ await client.removeChannel(cloudChannel); }catch(e){} cloudChannel=null; }
+            render();
+            alert('Der Einsatz wurde auf einem anderen Gerät beendet.');
+          });
+          return;
+        }
+
         const remote=payload.new?.zustand;
-        if(!remote || applyingCloudState) return;
+        if(!remote) return;
         applyingCloudState=true;
         try{
           remote.einsatz=remote.einsatz||{};
@@ -304,7 +374,26 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     const client=cloudClient();
     if(!client || !currentSession || !state?.einsatz?.cloudId) return;
     const {data,error}=await client.from('einsaetze').select('id,einsatz_code,zustand,status').eq('id',state.einsatz.cloudId).single();
-    if(error || !data?.zustand) return;
+    if(error || !data) return;
+
+    // Falls der Einsatz währenddessen auf einem anderen Gerät beendet wurde.
+    if(data.status === 'beendet'){
+      if(data.zustand){
+        const remote=data.zustand;
+        remote.einsatz=remote.einsatz||{};
+        remote.einsatz.cloudId=data.id;
+        remote.einsatz.code=data.einsatz_code || remote.einsatz.code;
+        saveHistory(remote);
+      }
+      applyingCloudState=true;
+      state=null;
+      await saveState(null);
+      applyingCloudState=false;
+      if(cloudChannel){ try{ await client.removeChannel(cloudChannel); }catch(e){} cloudChannel=null; }
+      return;
+    }
+
+    if(!data.zustand) return;
     applyingCloudState=true;
     state=data.zustand;
     state.einsatz.cloudId=data.id;
@@ -329,11 +418,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
       <div id="role-msg" style="color:var(--red);font-size:13px;margin-top:12px;min-height:18px;">${esc(message||'')}</div>
       <button class="btn ghost small" style="width:100%;margin-top:8px;" id="btn-admin-login">Administrator-Anmeldung</button>
     </div>`;
-    app.querySelectorAll('.role-btn').forEach(btn=>btn.onclick=async()=>{
-      setRole(btn.dataset.role);
-      await syncProfileRole();
-      render();
-    });
+    app.querySelectorAll('.role-btn').forEach(btn=>btn.onclick=()=>selectRole(btn.dataset.role));
     app.querySelector('#btn-admin-login').onclick=()=>renderAdminLogin();
   }
 
@@ -697,7 +782,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 23.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 27.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-role">${esc(roleLabel())}</button><button class="btn small" id="btn-history">Gespeicherte Einsätze</button><button class="btn small" id="btn-einsatz-qr">QR-Code</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
