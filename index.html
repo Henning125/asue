@@ -9,7 +9,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Atemschutzüberwachung – v29</title>
+<title>Atemschutzüberwachung – v23</title>
 <script src="./jsQR.js"></script>
 <script src="./qrcode-generator.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -140,7 +140,7 @@
   .event-grid .quick-btn{min-height:48px;}
   @media (max-width:600px){ .event-grid{grid-template-columns:1fr 1fr;} }
 
-  .log-mini{margin-top:10px; font-size:11px; color:var(--text-dim); border-top:1px solid var(--line); padding-top:8px; height:150px; max-height:150px; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
+  .log-mini{margin-top:10px; font-size:11px; color:var(--text-dim); border-top:1px solid var(--line); padding-top:8px; max-height:70px; overflow:auto;}
 
   /* modal */
   .overlay{position:fixed; inset:0; background:rgba(10,12,14,0.72); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px;}
@@ -367,16 +367,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
           saveState(state).finally(()=>{ applyingCloudState=false; render(); });
         }catch(e){ applyingCloudState=false; console.warn(e); }
       })
-      .subscribe(async status=>{
-        console.log('Realtime:',status);
-        // Nach einer Offline-Phase kann es sein, dass während der
-        // Unterbrechung Änderungen auf einem anderen Gerät passiert sind.
-        // Sobald der Realtime-Kanal wieder verbunden ist, holen wir deshalb
-        // den aktuellen Cloud-Stand aktiv nach.
-        if(status === 'SUBSCRIBED'){
-          setTimeout(()=>refreshCloudStateIfAvailable().catch(e=>console.warn('Cloud-Refresh nach Reconnect:',e)),150);
-        }
-      });
+      .subscribe(status=>console.log('Realtime:',status));
   }
 
   async function refreshCloudStateIfAvailable(){
@@ -519,20 +510,10 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
   async function saveState(state){
     const json = JSON.stringify(state);
-    // WICHTIG: Kein Persistenzweg darf die Bedienung blockieren.
-    // IndexedDB und Shared Storage laufen bewusst im Hintergrund.
-    // localStorage wird synchron geschrieben und dient als sofortiger Fallback.
+    try{ await idbSet(STORE_KEY, state); }catch(e){ console.warn('IndexedDB save failed', e); }
     try{ localStorage.setItem(STORE_KEY, json); }catch(e){ console.warn('local save failed', e); }
-    idbSet(STORE_KEY, state).catch(e=>console.warn('IndexedDB save failed', e));
-    try{
-      if(window.storage && window.storage.set){
-        Promise.resolve(window.storage.set(STORE_KEY, json, true)).catch(e=>console.warn('shared save failed', e));
-      }
-    }catch(e){ console.warn('shared save failed', e); }
-    // Cloud-Sync darf die lokale Bedienung niemals blockieren.
-    if(!applyingCloudState && state?.einsatz?.cloudId){
-      cloudSaveState(state).catch(e=>console.warn('cloud save failed', e));
-    }
+    try{ if(window.storage && window.storage.set) await window.storage.set(STORE_KEY, json, true); }catch(e){ console.warn('shared save failed', e); }
+    if(!applyingCloudState){ try{ await cloudSaveState(state); }catch(e){ console.warn('cloud save failed', e); } }
   }
 
   async function loadLocalState(){
@@ -708,21 +689,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     return false;
   }
 
-  window.addEventListener('online', ()=>setTimeout(async ()=>{
-    // Nach Rückkehr der Verbindung immer zuerst den aktuellen Cloud-Stand
-    // holen. So werden Änderungen anderer Tablets auch ohne Neustart sichtbar.
-    try{
-      if(state?.einsatz?.cloudId){
-        await refreshCloudStateIfAvailable();
-        if(state?.einsatz?.cloudId) await startRealtime(state.einsatz.cloudId);
-      }else{
-        await syncOfflineEinsatzIfPossible();
-      }
-    }catch(e){
-      console.warn('Synchronisierung nach Online-Rückkehr fehlgeschlagen:',e);
-    }
-    render();
-  },500));
+  window.addEventListener('online', ()=>setTimeout(()=>syncOfflineEinsatzIfPossible(),500));
 
   function renderSetup(){
     app.innerHTML = `
@@ -792,11 +759,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     const positions = {};
     document.querySelectorAll('.trupp .log-mini').forEach(el=>{
       const card = el.closest('.trupp');
-      if(card && card.id){
-        const max = Math.max(0, el.scrollHeight - el.clientHeight);
-        const atBottom = max <= 4 || (max - el.scrollTop) <= 12;
-        positions[card.id] = {top: el.scrollTop, atBottom};
-      }
+      if(card && card.id) positions[card.id] = el.scrollTop;
     });
     return positions;
   }
@@ -804,13 +767,9 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
   function restoreLogScrollPositions(positions){
     if(!positions) return;
     requestAnimationFrame(()=>{
-      requestAnimationFrame(()=>{
-        Object.entries(positions).forEach(([id, pos])=>{
-          const el = document.querySelector('#'+CSS.escape(id)+' .log-mini');
-          if(!el) return;
-          const max = Math.max(0, el.scrollHeight - el.clientHeight);
-          el.scrollTop = pos && pos.atBottom ? max : Math.min(Number(pos?.top)||0, max);
-        });
+      Object.entries(positions).forEach(([id, top])=>{
+        const el = document.querySelector('#'+CSS.escape(id)+' .log-mini');
+        if(el) el.scrollTop = top;
       });
     });
   }
@@ -823,7 +782,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
 
     app.innerHTML = `
       <header class="top">
-        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 30.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
+        <div class="brand"><div><h1>Atemschutzüberwachung</h1><div class="creator-inline">Created by Henning Ludwig <span class="version-inline">• Version 32.0</span></div></div><span class="sub">Live</span><span class="cloud-badge">● Mehrgeräte-Cloud</span></div>
         <div style="display:flex; gap:8px;">
           <button class="btn small" id="btn-role">${esc(roleLabel())}</button><button class="btn small" id="btn-history">Gespeicherte Einsätze</button><button class="btn small" id="btn-einsatz-qr">QR-Code</button>
           <button class="btn small" id="btn-nachweis">Nachweis / Export</button>
@@ -900,7 +859,7 @@ function isReadOnlyRole(){ const r=getRole(); return r==='einsatzleiter' || r===
     const status = computeStatus(t);
     const badgeMap = {prep:'Vorbereitet', ok:'Normal', warn1:'1/3 erreicht', warn2:'2/3 – Rückzug prüfen!', ended:'Beendet'};
     const membersHtml = t.mitglieder.map(m=>`<div><b>${esc(m.name)||'—'}</b>${m.startdruck!=null?(' · Start: '+esc(m.startdruck)+' bar'):''}</div>`).join('');
-    const logHtml = t.log.map(l=>`<div>${fmtTime(new Date(l.zeit))} — ${esc(l.text)}</div>`).join('');
+    const logHtml = t.log.slice(-4).map(l=>`<div>${fmtTime(new Date(l.zeit))} — ${esc(l.text)}</div>`).join('');
 
     let timerHtml = '';
     let druckSummary = '';
