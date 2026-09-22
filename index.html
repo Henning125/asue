@@ -9,7 +9,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Atemschutzüberwachung – v18</title>
+<title>Atemschutzüberwachung – v19</title>
 <script src="./jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
@@ -559,7 +559,7 @@
         <h2>Trupp vorbereiten</h2>
         <div class="field"><label>Truppbezeichnung</label><input id="m-name" placeholder="z. B. Trupp 1 / Angriffstrupp"></div>
         <div class="field"><label>Funkruf des Trupps <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label><input id="m-funkruf" placeholder="z. B. Angriffstrupp 1"></div>
-        <div class="field"><label>Auftrag</label><div id="m-auftrag-buttons" class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG'].map(x=>`<button type="button" class="quick-btn" data-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="m-auftrag" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
+        <div class="field"><label>Auftrag</label><div id="m-auftrag-buttons" class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG','Brandbekämpfung','Menschenrettung'].map(x=>`<button type="button" class="quick-btn" data-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="m-auftrag" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
         <div class="field"><label>Voraussichtliche Einsatzzeit (Minuten)</label><input id="m-zeit" type="number" min="5" step="5" value="30"></div>
         <div id="members-wrap"></div>
         <button class="btn small ghost" id="m-add-member">+ Weiteres Mitglied</button>
@@ -641,7 +641,7 @@
         <h2>Trupp bearbeiten</h2>
         <div class="field"><label>Truppbezeichnung</label><input id="e-name" value="${esc(tmp.name)}"></div>
         <div class="field"><label>Funkruf des Trupps <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label><input id="e-funkruf" value="${esc(tmp.funkruf)}"></div>
-        <div class="field"><label>Auftrag</label><div id="e-auftrag-buttons" class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG'].map(x=>`<button type="button" class="quick-btn ${tmp.auftrag===x?'selected':''}" data-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="e-auftrag" value="${esc(tmp.auftrag)}" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
+        <div class="field"><label>Auftrag</label><div id="e-auftrag-buttons" class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG','Brandbekämpfung','Menschenrettung'].map(x=>`<button type="button" class="quick-btn ${tmp.auftrag===x?'selected':''}" data-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="e-auftrag" value="${esc(tmp.auftrag)}" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
         <div class="field"><label>Voraussichtliche Einsatzzeit (Minuten)</label><input id="e-zeit" type="number" min="5" step="5" value="${tmp.erwarteteZeitMin}"></div>
         <div id="edit-members-wrap"></div>
         <button class="btn small ghost" id="e-add-member">+ Weiteres Mitglied</button>
@@ -714,7 +714,10 @@
       return;
     }
     const allSet = t.mitglieder.every(m => m.startdruck!=null && m.startdruck!=='' && Number.isFinite(Number(m.startdruck)));
-    if(!allSet){
+    // Wenn noch Drücke fehlen ODER noch kein Auftrag hinterlegt ist,
+    // öffnen wir die Startmaske. So kann der Auftrag auch dann noch
+    // erfasst werden, wenn die Startdrücke bereits vorher eingetragen wurden.
+    if(!allSet || !String(t.auftrag||'').trim()) {
       openStartModal(id);
       return;
     }
@@ -731,7 +734,7 @@
     render();
   }
 
-  // ---------- Start-Modal: nur wenn Startdrücke noch nicht vollständig vorliegen ----------
+  // ---------- Start-Modal: Startdrücke und/oder Auftrag erfassen ----------
   function openStartModal(id){
     const t = state.trupps.find(x=>x.id===id); if(!t) return;
     const overlay = document.createElement('div');
@@ -740,7 +743,7 @@
       <div class="modal">
         <h2>${esc(t.name)} — Luft anschließen</h2>
         <p style="color:var(--text-dim); font-size:13px; margin-top:-8px;">Startdrücke erfassen. Der Timer beginnt erst mit "Start".</p>
-        <div class="field"><label>Auftrag</label><div class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG'].map(x=>`<button type="button" class="quick-btn ${t.auftrag===x?'selected':''}" data-start-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="sd-auftrag" value="${esc(t.auftrag||'')}" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
+        <div class="field"><label>Auftrag</label><div class="quick-buttons">${['Linke Hand','Rechte Hand','Keller','1OG','2.OG','3.OG','Brandbekämpfung','Menschenrettung'].map(x=>`<button type="button" class="quick-btn ${t.auftrag===x?'selected':''}" data-start-auftrag="${esc(x)}">${esc(x)}</button>`).join('')}</div><input id="sd-auftrag" value="${esc(t.auftrag||'')}" placeholder="Freitext / eigener Auftrag" style="margin-top:8px;"></div>
         <div id="druck-wrap">
           ${t.mitglieder.map((m,i)=>`
             <div class="field">
